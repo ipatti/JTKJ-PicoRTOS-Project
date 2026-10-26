@@ -13,8 +13,6 @@
 // Exercise 4. Include the libraries necessaries to use the usb-serial-debug, and tinyusb
 // Tehtävä 4 . Lisää usb-serial-debugin ja tinyusbin käyttämiseen tarvittavat kirjastot.
 
-
-
 #define DEFAULT_STACK_SIZE 2048
 #define CDC_ITF_TX      1
 
@@ -30,6 +28,7 @@ uint32_t ambientLight;
 
 static void btn_fxn(uint gpio, uint32_t eventMask) {
     // Tehtävä 1: Vaihda LEDin tila käyttämällä TKJHAT SDK:n sopivaa funktiota.
+   toggle_led();
     // Exercise 1: Toggle the LED using the appropriate function from the TKJHAT SDK.
 }
 
@@ -158,8 +157,9 @@ int main() {
     //             Interruption handler is defined up as btn_fxn
     // Tehtävä 1:  Alusta painike ja LEd ja rekisteröi vastaava keskeytys.
     //             Keskeytyskäsittelijä on määritelty yläpuolella nimellä btn_fxn
-
-
+    init_sw1 ();
+    init_red_led ();
+    gpio_set_irq_enabled_with_callback(BUTTON1, GPIO_IRQ_EDGE_FALL, true, btn_fxn);
 
     
     
