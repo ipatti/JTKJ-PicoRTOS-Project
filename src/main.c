@@ -10,6 +10,8 @@
 #include "tkjhat/sdk.h"
 
 #define IMU_TASK_STACK_SIZE 1024
+#define SERIAL_TASK_STACK_SIZE 1024
+#define SERIAL_BUFFER_SIZE 256
 
 
 static void imuTask( void *pvParameters) {
@@ -27,6 +29,38 @@ static void imuTask( void *pvParameters) {
     }
 }
 
+static void serialTask(void *pvParameters) {
+    (void)pvParameters;
+
+    char message[SERIAL_BUFFER_SIZE];
+    size_t index = 0;
+
+    while (1) {
+        int c = getchar_timeout_us(0);
+
+        if (c == PICO_ERROR_TIMEOUT) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        if (c == '\r') {
+            continue;
+        }
+
+        if (c == '\n') {
+            message[index] = '\0';
+
+            printf("%s  \n", message);
+            stdio_flush();
+
+            index = 0;
+        } else if (index < SERIAL_BUFFER_SIZE - 1) {
+            message[index++] = (char)c;
+        } else {
+            index = 0;
+        }
+    }
+}
 
 int main() {
     stdio_init_all();
@@ -43,7 +77,7 @@ int main() {
 
 
     BaseType_t result = xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
-
+    BaseType_t result = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL)
     vTaskStartScheduler();
 
     return 0;
