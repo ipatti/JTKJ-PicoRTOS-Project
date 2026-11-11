@@ -16,10 +16,10 @@ static void buttonTask(void *pvParameters) {
 
     while(1) {
         if (gpio_get(SW1_PIN) == 1) {
-            printf("SW1 pressed\n");
+            // printf("SW1 pressed\n");
         }
         else if (gpio_get(SW2_PIN) == 1) {
-            printf("SW2 pressed\n");
+            // printf("SW2 pressed\n");
         }
         
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -40,7 +40,7 @@ static void imuTask( void *pvParameters) {
 
         vTaskDelay(pdMS_TO_TICKS(1000));
 
-        printf("Gyro: gx=%.2f, gy=%.2f, gz=%.2f\n", gx, gy, gz);
+        // printf("Gyro: gx=%.2f, gy=%.2f, gz=%.2f\n", gx, gy, gz);
     }
 }
 
@@ -101,7 +101,7 @@ int main() {
 
     //Create button task
     BaseType_t buttonResult = xTaskCreate(buttonTask, "Button Task", BUTTON_TASK_STACK_SIZE, NULL, 1, NULL);
-    BaseType_t serialResult = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL)
+    BaseType_t serialResult = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
     vTaskStartScheduler();
 
     return 0;
