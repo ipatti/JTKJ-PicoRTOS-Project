@@ -65,6 +65,27 @@ static void imuTask(void *pvParameters) {
     }
 }
 
+static void buzzerbeater(const char *m) {
+    for (int i = 0; m[i] != '\0'; i++) {
+                
+                if (m[i] == ' ') {
+                    if (m[i + 1] == ' ') {
+                        sleep_ms(1400);
+                        i++;
+                    } else {
+                        sleep_ms(600);
+                    }
+                }
+                else if (m[i] == '.') {
+                    buzzer_play_tone(1000, 200);
+                    sleep_ms(200);
+                }
+                else if (m[i] == '-') {
+                    buzzer_play_tone(1000, 600);
+                }
+            }
+}
+
 //task to read serial input and display it on the screen and play buzzer tones
 static void serialTask(void *pvParameters) {
     (void)pvParameters;
@@ -90,27 +111,7 @@ static void serialTask(void *pvParameters) {
             printf("%s  \n", message);
             clear_display();
             write_text_xy(0, 0, message);
-            
-            for (int i = 0; i < sizeof(message) - 1; i++) {
-                if (message[i] == '\0') {
-                    break;
-                }
-                else if (message[i] == ' ') {
-                    if (message[i + 1] == ' ') {
-                        buzzer_play_tone(1000, 1400);
-                        i++;
-                    } else {
-                        buzzer_play_tone(1000, 600);
-                    }
-                }
-                else if (message[i] == '.') {
-                    buzzer_play_tone(1000, 200);
-                    sleep_ms(200);
-                }
-                else if (message[i] == '-') {
-                    buzzer_play_tone(1000, 600);
-                }
-            }
+            buzzerbeater(message);
 
             stdio_flush();
 
