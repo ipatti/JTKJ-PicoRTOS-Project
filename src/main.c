@@ -13,17 +13,41 @@
 #define SERIAL_TASK_STACK_SIZE 1024
 #define SERIAL_BUFFER_SIZE 256
 
+uint8_t button_pressed = 0;
 
+//button interrupt handler
 static void btn_fxn(uint gpio, uint32_t eventMask) {
+    //Debounce the button press by checking the time since the last press
+    static uint32_t last_ms = 0;
+
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+
+    if (now - last_ms < 500) {
+        return;
+    }
+    last_ms = now;
+
     if (gpio == SW1_PIN) {
-        printf("button1\n");
-        buzzer_play_tone(1000, 200); // Play a tone at 1000 Hz for 200 ms
+        button_pressed = 1;
     } else if (gpio == SW2_PIN) {
-        printf("button2\n");
-        buzzer_play_tone(1000, 200); // Play a tone at 1000 Hz for 200 ms
+        button_pressed = 1;
     }
 }
 
+static void print_task(void *arg) {
+    (void)arg;
+    while (1) {
+        if (button_pressed) {
+            printf("Button pressed!\n");
+            buzzer_play_tone(1000, 200);
+            button_pressed = 0;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+//ImuTask that reads the sensor data and prints it to the serial port
 static void imuTask(void *pvParameters) {
     (void)pvParameters;
     float gx, gy, gz, ay, ax, az, t;
@@ -36,7 +60,7 @@ static void imuTask(void *pvParameters) {
         stdio_flush();
         vTaskDelay(pdMS_TO_TICKS(500));
 
-        printf(">gx=%.2f,gy=%.2f,gz=%.2f\n", gx, gy, gz);
+        printf(">gx:%.2f,gy:%.2f,gz:%.2f\n", gx, gy, gz);
         
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -45,7 +69,7 @@ static void imuTask(void *pvParameters) {
 
     }
 }
-
+//Serial task that reads the serial input and prints it to the serial port
 static void serialTask(void *pvParameters) {
     (void)pvParameters;
 
@@ -80,7 +104,7 @@ static void serialTask(void *pvParameters) {
 }
 
 
-
+//main function that initializes the SDK, the sensor, the buttons, and creates the tasks
 int main() {
     stdio_init_all();
     init_hat_sdk();
@@ -109,6 +133,7 @@ int main() {
     // Create imutask and serial task
     BaseType_t result = xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     BaseType_t serialResult = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
+    BaseType_t printResult = xTaskCreate(print_task, "Print Task", DEFAULT_STACK_SIZE, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
