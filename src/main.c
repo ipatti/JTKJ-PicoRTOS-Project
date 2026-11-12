@@ -14,26 +14,15 @@
 #define SERIAL_BUFFER_SIZE 256
 
 
-<<<<<<< HEAD
 static void btn_fxn(uint gpio, uint32_t eventMask) {
     if (gpio == SW1_PIN) {
         printf("button1\n");
+        buzzer_play_tone(1000, 200); // Play a tone at 1000 Hz for 200 ms
     } else if (gpio == SW2_PIN) {
         printf("button2\n");
-=======
-    while(1) {
-        if (gpio_get(SW1_PIN) == 1) {
-            // printf("SW1 pressed\n");
-        }
-        else if (gpio_get(SW2_PIN) == 1) {
-            // printf("SW2 pressed\n");
-        }
-        
-        vTaskDelay(pdMS_TO_TICKS(100));
->>>>>>> 3e7f62f6435014cd20240850f5fb2a209283a945
+        buzzer_play_tone(1000, 200); // Play a tone at 1000 Hz for 200 ms
     }
 }
-
 
 static void imuTask(void *pvParameters) {
     (void)pvParameters;
@@ -47,14 +36,13 @@ static void imuTask(void *pvParameters) {
         stdio_flush();
         vTaskDelay(pdMS_TO_TICKS(500));
 
-<<<<<<< HEAD
         printf(">gx=%.2f,gy=%.2f,gz=%.2f\n", gx, gy, gz);
         
-=======
+
         vTaskDelay(pdMS_TO_TICKS(1000));
 
         // printf("Gyro: gx=%.2f, gy=%.2f, gz=%.2f\n", gx, gy, gz);
->>>>>>> 3e7f62f6435014cd20240850f5fb2a209283a945
+
     }
 }
 
@@ -109,25 +97,22 @@ int main() {
     init_sw1();
     init_sw2();
 
+    //init buzzer
+    init_buzzer();
+
     // Rekisteröidään keskeytykset napeille SW1_PIN ja SW2_PIN
     gpio_set_irq_enabled_with_callback(SW1_PIN, GPIO_IRQ_EDGE_FALL, true, btn_fxn);
     gpio_set_irq_enabled(SW2_PIN, GPIO_IRQ_EDGE_FALL, true);
 
     sleep_ms(50);
 
-    // Create imutask
+    // Create imutask and serial task
     BaseType_t result = xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     BaseType_t serialResult = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
 
-
-<<<<<<< HEAD
-=======
-    //Create button task
-    BaseType_t buttonResult = xTaskCreate(buttonTask, "Button Task", BUTTON_TASK_STACK_SIZE, NULL, 1, NULL);
-    BaseType_t serialResult = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
->>>>>>> 3e7f62f6435014cd20240850f5fb2a209283a945
     vTaskStartScheduler();
 
     while (1);
+
     return 0;
 }
