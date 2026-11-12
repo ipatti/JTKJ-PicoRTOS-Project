@@ -14,11 +14,23 @@
 #define SERIAL_BUFFER_SIZE 256
 
 
+<<<<<<< HEAD
 static void btn_fxn(uint gpio, uint32_t eventMask) {
     if (gpio == SW1_PIN) {
         printf("button1\n");
     } else if (gpio == SW2_PIN) {
         printf("button2\n");
+=======
+    while(1) {
+        if (gpio_get(SW1_PIN) == 1) {
+            // printf("SW1 pressed\n");
+        }
+        else if (gpio_get(SW2_PIN) == 1) {
+            // printf("SW2 pressed\n");
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(100));
+>>>>>>> 3e7f62f6435014cd20240850f5fb2a209283a945
     }
 }
 
@@ -35,8 +47,14 @@ static void imuTask(void *pvParameters) {
         stdio_flush();
         vTaskDelay(pdMS_TO_TICKS(500));
 
+<<<<<<< HEAD
         printf(">gx=%.2f,gy=%.2f,gz=%.2f\n", gx, gy, gz);
         
+=======
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // printf("Gyro: gx=%.2f, gy=%.2f, gz=%.2f\n", gx, gy, gz);
+>>>>>>> 3e7f62f6435014cd20240850f5fb2a209283a945
     }
 }
 
@@ -102,6 +120,12 @@ int main() {
     BaseType_t serialResult = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
 
 
+<<<<<<< HEAD
+=======
+    //Create button task
+    BaseType_t buttonResult = xTaskCreate(buttonTask, "Button Task", BUTTON_TASK_STACK_SIZE, NULL, 1, NULL);
+    BaseType_t serialResult = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
+>>>>>>> 3e7f62f6435014cd20240850f5fb2a209283a945
     vTaskStartScheduler();
 
     while (1);
