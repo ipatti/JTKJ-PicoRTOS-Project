@@ -172,7 +172,7 @@ int main() {
     BaseType_t result = xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     BaseType_t serialResult = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
     BaseType_t printResult = xTaskCreate(print_task, "Print Task", DEFAULT_STACK_SIZE, NULL, 1, NULL);
-    BaseType_t displayResult = xTaskCreate(display_task, "Display Task", DISPLAY_TASK_STACK_SIZE, NULL, 1, NULL);
+    BaseType_t displayResult = xTaskCreate(displayTask, "Display Task", DISPLAY_TASK_STACK_SIZE, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
