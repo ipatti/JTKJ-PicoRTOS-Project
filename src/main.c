@@ -5,6 +5,7 @@
 #include <FreeRTOS.h>
 #include <queue.h>
 #include <task.h>
+#include <semphr.h>
 
 #include "tkjhat/sdk.h"
 
@@ -12,7 +13,11 @@
 #define DEFAULT_STACK_SIZE 2048
 #define SERIAL_TASK_STACK_SIZE 1024
 #define SERIAL_BUFFER_SIZE 256
+#define DISPLAY_TASK_STACK_SIZE 1024
+#define DISPLAY_TEXT_BUFFER_SIZE 256
 
+static char display_text[DISPLAY_TEXT_BUFFER_SIZE] = "Waiting...";
+static SemaphoreHandle_t display_mutex;
 uint8_t button_pressed = 0;
 
 //button interrupt handler
@@ -91,6 +96,12 @@ static void serialTask(void *pvParameters) {
         if (c == '\n') {
             message[index] = '\0';
 
+            if (xSemaphoreTake(display_mutex, portMAX_DELAY) == pdTRUE) {
+            strncpy(display_text, message, DISPLAY_TEXT_BUFFER_SIZE);
+            display_text[DISPLAY_TEXT_BUFFER_SIZE - 1] = '\0';
+            xSemaphoreGive(display_mutex);
+}
+
             printf("%s  \n", message);
             stdio_flush();
 
@@ -103,11 +114,38 @@ static void serialTask(void *pvParameters) {
     }
 }
 
+static void displayTask(void *pvParameters) {
+    (void)pvParameters;
+
+    init_display();
+
+    while (1) {
+        char local_text[DISPLAY_TEXT_BUFFER_SIZE] = "";
+
+        if (xSemaphoreTake(display_mutex, portMAX_DELAY) == pdTRUE) {
+            strncpy(local_text, display_text, DISPLAY_TEXT_BUFFER_SIZE);
+            local_text[DISPLAY_TEXT_BUFFER_SIZE - 1] = '\0';
+            xSemaphoreGive(display_mutex);
+        }
+
+        clear_display();
+        write_text_xy(0, 0, local_text);
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+
 
 //main function that initializes the SDK, the sensor, the buttons, and creates the tasks
 int main() {
     stdio_init_all();
     init_hat_sdk();
+    display_mutex = xSemaphoreCreateMutex();
+
+    if (display_mutex == NULL) {
+        return 1;
+    }
 
     sleep_ms(300);
 
@@ -134,6 +172,7 @@ int main() {
     BaseType_t result = xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     BaseType_t serialResult = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
     BaseType_t printResult = xTaskCreate(print_task, "Print Task", DEFAULT_STACK_SIZE, NULL, 1, NULL);
+    BaseType_t displayResult = xTaskCreate(display_task, "Display Task", DISPLAY_TASK_STACK_SIZE, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
