@@ -5,7 +5,6 @@
 #include <FreeRTOS.h>
 #include <queue.h>
 #include <task.h>
-#include <semphr.h>
 
 #include "tkjhat/sdk.h"
 
@@ -13,16 +12,11 @@
 #define DEFAULT_STACK_SIZE 2048
 #define SERIAL_TASK_STACK_SIZE 1024
 #define SERIAL_BUFFER_SIZE 256
-#define DISPLAY_TASK_STACK_SIZE 1024
-#define DISPLAY_TEXT_BUFFER_SIZE 256
 
-static char display_text[DISPLAY_TEXT_BUFFER_SIZE] = "Waiting...";
-static SemaphoreHandle_t display_mutex;
 uint8_t button_pressed = 0;
 
 //button interrupt handler
 static void btn_fxn(uint gpio, uint32_t eventMask) {
-    //Debounce the button press by checking the time since the last press
     static uint32_t last_ms = 0;
 
     uint32_t now = to_ms_since_boot(get_absolute_time());
@@ -39,6 +33,7 @@ static void btn_fxn(uint gpio, uint32_t eventMask) {
     }
 }
 
+//print task to handle button presses and play buzzer tones
 static void print_task(void *arg) {
     (void)arg;
     while (1) {
@@ -52,29 +47,25 @@ static void print_task(void *arg) {
     }
 }
 
-//ImuTask that reads the sensor data and prints it to the serial port
+//task to read IMU data and print it to the console
 static void imuTask(void *pvParameters) {
     (void)pvParameters;
     float gx, gy, gz, ay, ax, az, t;
-    
+
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     while (1) {
         ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t);
-        //flushesh the buffer :)
         stdio_flush();
         vTaskDelay(pdMS_TO_TICKS(500));
 
-        printf(">gx:%.2f,gy:%.2f,gz:%.2f\n", gx, gy, gz);
-        
+        //printf(">gx:%.2f,gy:%.2f,gz:%.2f\n", gx, gy, gz);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
-
-        // printf("Gyro: gx=%.2f, gy=%.2f, gz=%.2f\n", gx, gy, gz);
-
     }
 }
-//Serial task that reads the serial input and prints it to the serial port
+
+//task to read serial input and display it on the screen and play buzzer tones
 static void serialTask(void *pvParameters) {
     (void)pvParameters;
 
@@ -96,13 +87,31 @@ static void serialTask(void *pvParameters) {
         if (c == '\n') {
             message[index] = '\0';
 
-            if (xSemaphoreTake(display_mutex, portMAX_DELAY) == pdTRUE) {
-            strncpy(display_text, message, DISPLAY_TEXT_BUFFER_SIZE);
-            display_text[DISPLAY_TEXT_BUFFER_SIZE - 1] = '\0';
-            xSemaphoreGive(display_mutex);
-}
-
             printf("%s  \n", message);
+            clear_display();
+            write_text_xy(0, 0, message);
+            
+            for (int i = 0; i < sizeof(message) - 1; i++) {
+                if (message[i] == '\0') {
+                    break;
+                }
+                else if (message[i] == ' ') {
+                    if (message[i + 1] == ' ') {
+                        buzzer_play_tone(1000, 1400);
+                        i++;
+                    } else {
+                        buzzer_play_tone(1000, 600);
+                    }
+                }
+                else if (message[i] == '.') {
+                    buzzer_play_tone(1000, 200);
+                    sleep_ms(200);
+                }
+                else if (message[i] == '-') {
+                    buzzer_play_tone(1000, 600);
+                }
+            }
+
             stdio_flush();
 
             index = 0;
@@ -114,40 +123,16 @@ static void serialTask(void *pvParameters) {
     }
 }
 
-static void displayTask(void *pvParameters) {
-    (void)pvParameters;
-
-    init_display();
-
-    while (1) {
-        char local_text[DISPLAY_TEXT_BUFFER_SIZE] = "";
-
-        if (xSemaphoreTake(display_mutex, portMAX_DELAY) == pdTRUE) {
-            strncpy(local_text, display_text, DISPLAY_TEXT_BUFFER_SIZE);
-            local_text[DISPLAY_TEXT_BUFFER_SIZE - 1] = '\0';
-            xSemaphoreGive(display_mutex);
-        }
-
-        clear_display();
-        write_text_xy(0, 0, local_text);
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-}
-
-
-
-//main function that initializes the SDK, the sensor, the buttons, and creates the tasks
+// (en) Main function
 int main() {
     stdio_init_all();
     init_hat_sdk();
-    display_mutex = xSemaphoreCreateMutex();
-
-    if (display_mutex == NULL) {
-        return 1;
-    }
 
     sleep_ms(300);
+
+    // Näyttö: alustus ja teksti kerran
+    init_display();
+    clear_display();
 
     // Initialize the ICM42670 sensor
     init_ICM42670();
@@ -162,17 +147,14 @@ int main() {
     //init buzzer
     init_buzzer();
 
-    // Rekisteröidään keskeytykset napeille SW1_PIN ja SW2_PIN
     gpio_set_irq_enabled_with_callback(SW1_PIN, GPIO_IRQ_EDGE_FALL, true, btn_fxn);
     gpio_set_irq_enabled(SW2_PIN, GPIO_IRQ_EDGE_FALL, true);
 
     sleep_ms(50);
 
-    // Create imutask and serial task
-    BaseType_t result = xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
-    BaseType_t serialResult = xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
-    BaseType_t printResult = xTaskCreate(print_task, "Print Task", DEFAULT_STACK_SIZE, NULL, 1, NULL);
-    BaseType_t displayResult = xTaskCreate(displayTask, "Display Task", DISPLAY_TASK_STACK_SIZE, NULL, 1, NULL);
+    xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
+    xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
+    xTaskCreate(print_task, "Print Task", DEFAULT_STACK_SIZE, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
