@@ -14,7 +14,8 @@
 #define SERIAL_TASK_STACK_SIZE 1024
 #define SERIAL_BUFFER_SIZE 256
 
-uint8_t button_pressed = 0;
+uint8_t button1_pressed = 0;
+uint8_t button2_pressed = 0;
 
 //button interrupt handler
 static void btn_fxn(uint gpio, uint32_t eventMask) {
@@ -28,23 +29,9 @@ static void btn_fxn(uint gpio, uint32_t eventMask) {
     last_ms = now;
 
     if (gpio == SW1_PIN) {
-        button_pressed = 1;
+        button1_pressed = 1;
     } else if (gpio == SW2_PIN) {
-        button_pressed = 1;
-    }
-}
-
-//print task to handle button presses and play buzzer tones
-static void print_task(void *arg) {
-    (void)arg;
-    while (1) {
-        if (button_pressed) {
-            printf("Button pressed!\n");
-            buzzer_play_tone(1000, 200);
-            button_pressed = 0;
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(100));
+        button2_pressed = 1;
     }
 }
 
@@ -60,9 +47,21 @@ static void imuTask(void *pvParameters) {
         stdio_flush();
         vTaskDelay(pdMS_TO_TICKS(500));
 
-        //printf(">gx:%.2f,gy:%.2f,gz:%.2f\n", gx, gy, gz);
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        //printf(">ax:%.2f,ay:%.2f,az:%.2f\n", ax, ay, az);
+        if (az > 0.0 && button1_pressed) {
+            printf(". Button 1 pressed and az > 0.0\n");
+            buzzer_play_tone(1000, 200);
+            button1_pressed = 0;
+        }
+
+        if (az < 0.0 && button1_pressed) {
+            printf("- Button 1 pressed and az < 0.0\n");
+            buzzer_play_tone(1000, 200);
+            button1_pressed = 0;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -177,7 +176,6 @@ int main() {
 
     xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
-    xTaskCreate(print_task, "Print Task", DEFAULT_STACK_SIZE, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
