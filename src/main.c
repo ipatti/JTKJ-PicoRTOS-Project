@@ -6,7 +6,6 @@
 #include <queue.h>
 #include <task.h>
 #include <inttypes.h>
-#include <inttypes.h>
 
 #include "tkjhat/sdk.h"
 
@@ -20,6 +19,9 @@
 uint8_t button1_pressed = 0;
 uint8_t button2_pressed = 0;
 static QueueHandle_t msgQueue;
+// Display and IMU share the same I2C bus. Only imuTask touches I2C ("gatekeeper"),
+// other tasks send the text to draw through this queue (1 slot, always the latest text).
+static QueueHandle_t displayQueue;
 
 //button interrupt handler
 static void btn_fxn(uint gpio, uint32_t eventMask) {
@@ -39,43 +41,14 @@ static void btn_fxn(uint gpio, uint32_t eventMask) {
     }
 }
 
-//task to read IMU data and print it to the console
-static void imuTask(void *pvParameters) {
-    (void)pvParameters;
-    float gx, gy, gz, ay, ax, az, t;
-
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    while (1) {
-        ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t);
-        stdio_flush();
-        vTaskDelay(pdMS_TO_TICKS(500));
-
-
-        //printf(">ax:%.2f,ay:%.2f,az:%.2f\n", ax, ay, az);
-        if (az > 0.0 && button1_pressed) {
-            printf(". Button 1 pressed and az > 0.0\n");
-            buzzer_play_tone(1000, 200);
-            button1_pressed = 0;
-        }
-
-        if (az < 0.0 && button1_pressed) {
-            printf("- Button 1 pressed and az < 0.0\n");
-            buzzer_play_tone(1000, 200);
-            button1_pressed = 0;
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-}
-
-
-//function to display text and play buzzer tones based on the input string
-static void outputTask(const char *m) {
+//draws the message on the display, wrapping it to 21 characters per row (uses I2C -> only call from imuTask)
+static void drawMessage(const char *m) {
 
     uint8_t laskin = 0;
     uint8_t laskin2 = 0;
     char rivi[22];
+
+    clear_display();
 
     for (int i = 0; m[i] != '\0'; i++) {
         rivi[laskin] = m[i];
@@ -89,6 +62,56 @@ static void outputTask(const char *m) {
             laskin = 0;
         }
     }
+}
+
+//task to read IMU data and print it to the console. Also the only task that uses I2C, so it draws the display too.
+static void imuTask(void *pvParameters) {
+    (void)pvParameters;
+    float gx = 0, gy = 0, gz = 0, ay = 0, ax = 0, az = 0, t = 0;
+    char text[SERIAL_BUFFER_SIZE];
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    while (1) {
+        int rc = ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t);
+
+        if (rc != 0) {
+            printf("__IMU read failed__");
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        stdio_flush();
+
+        // Wait up to 500 ms (replaces the old vTaskDelay). If text to draw arrives, wake up and draw it right away.
+        if (xQueueReceive(displayQueue, text, pdMS_TO_TICKS(500)) == pdPASS) {
+            drawMessage(text);
+        }
+
+
+        //printf(">ax:%.2f,ay:%.2f,az:%.2f\n", ax, ay, az);
+        if (az > 0.0 && button1_pressed) {
+            printf(".");
+            printf("__btn1, az>0__");
+            stdio_flush();
+            buzzer_play_tone(1000, 200);
+            button1_pressed = 0;
+        }
+
+        if (az < 0.0 && button1_pressed) {
+            printf("-");
+            printf("__btn1, az<0__");
+            stdio_flush();
+            buzzer_play_tone(1000, 200);
+            button1_pressed = 0;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+
+//function to play buzzer tones based on the input string
+static void outputTask(const char *m) {
 
     for (int i = 0; m[i] != '\0'; i++) {
                 
@@ -120,7 +143,7 @@ static void queueTask(void *pvParameters) {
         xQueueReceive(msgQueue, m, portMAX_DELAY);
 
         printf("%s  \n", m);
-        clear_display();
+        xQueueOverwrite(displayQueue, m);   // imuTask draws it on the display
         outputTask(m);
         stdio_flush();
     }
@@ -151,7 +174,7 @@ static void serialTask(void *pvParameters) {
             message[index] = '\0';
 
             if (xQueueSend(msgQueue, message, 0) != pdPASS) {
-                printf("Queue full, message dropped\n");
+                printf("__Queue full, message dropped__");
             }
 
             index = 0;
@@ -194,6 +217,8 @@ int main() {
 
     // queue for "buffering" the messages send from serial client. Prevents the loss of messages before the device can output them
     msgQueue = xQueueCreate(MESSAGE_QUEUE_LENGTH, SERIAL_BUFFER_SIZE);
+    // 1 slot: the display only needs the newest text (used with xQueueOverwrite)
+    displayQueue = xQueueCreate(1, SERIAL_BUFFER_SIZE);
 
     xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 2, NULL);
