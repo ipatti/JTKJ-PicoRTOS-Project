@@ -5,6 +5,7 @@
 #include <FreeRTOS.h>
 #include <queue.h>
 #include <task.h>
+#include <inttypes.h>
 
 #include "tkjhat/sdk.h"
 
@@ -12,6 +13,7 @@
 #define DEFAULT_STACK_SIZE 2048
 #define SERIAL_TASK_STACK_SIZE 1024
 #define SERIAL_BUFFER_SIZE 256
+#define MORSE_TIME_UNIT_MS 200
 
 uint8_t button_pressed = 0;
 
@@ -39,7 +41,7 @@ static void print_task(void *arg) {
     while (1) {
         if (button_pressed) {
             printf("Button pressed!\n");
-            buzzer_play_tone(1000, 200);
+            buzzer_play_tone(1000, MORSE_TIME_UNIT_MS);
             button_pressed = 0;
         }
 
@@ -65,9 +67,39 @@ static void imuTask(void *pvParameters) {
     }
 }
 
+static void play_morse_message(const char *message) {
+    for (size_t i = 0; message[i] != '\0'; i++) {
+        if (message[i] == '.') {
+            buzzer_play_tone(1000, MORSE_TIME_UNIT_MS);
+        } else if (message[i] == '-') {
+            buzzer_play_tone(1000, 3 * MORSE_TIME_UNIT_MS);
+        } else if (message[i] == ' ') {
+            size_t space_count = 1;
+
+            while (message[i + space_count] == ' ') {
+                space_count++;
+            }
+
+            if (space_count >= 2) {
+                sleep_ms(7 * MORSE_TIME_UNIT_MS);
+                i += space_count - 1;
+            } else {
+                sleep_ms(3 * MORSE_TIME_UNIT_MS);
+            }
+        }
+
+        if ((message[i] == '.' || message[i] == '-') &&
+            (message[i + 1] == '.' || message[i + 1] == '-')) {
+            sleep_ms(MORSE_TIME_UNIT_MS);
+        }
+    }
+}
+
 //task to read serial input and display it on the screen and play buzzer tones
 static void serialTask(void *pvParameters) {
     (void)pvParameters;
+
+
 
     char message[SERIAL_BUFFER_SIZE];
     size_t index = 0;
@@ -87,30 +119,12 @@ static void serialTask(void *pvParameters) {
         if (c == '\n') {
             message[index] = '\0';
 
+            xQueueSend(q, &message);
+
             printf("%s  \n", message);
             clear_display();
             write_text_xy(0, 0, message);
-            
-            for (int i = 0; i < sizeof(message) - 1; i++) {
-                if (message[i] == '\0') {
-                    break;
-                }
-                else if (message[i] == ' ') {
-                    if (message[i + 1] == ' ') {
-                        buzzer_play_tone(1000, 1400);
-                        i++;
-                    } else {
-                        buzzer_play_tone(1000, 600);
-                    }
-                }
-                else if (message[i] == '.') {
-                    buzzer_play_tone(1000, 200);
-                    sleep_ms(200);
-                }
-                else if (message[i] == '-') {
-                    buzzer_play_tone(1000, 600);
-                }
-            }
+            play_morse_message(message);
 
             stdio_flush();
 
@@ -151,6 +165,8 @@ int main() {
     gpio_set_irq_enabled(SW2_PIN, GPIO_IRQ_EDGE_FALL, true);
 
     sleep_ms(50);
+    // queue for "buffering" the messages send from serial client. Prevents the loss of messages before the device can output them
+    static QueueHandle_t q = xQueueCreate(5, SERIAL_BUFFER_SIZE);
 
     xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
