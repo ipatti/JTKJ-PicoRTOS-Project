@@ -5,6 +5,7 @@
 #include <FreeRTOS.h>
 #include <queue.h>
 #include <task.h>
+#include <inttypes.h>
 
 #include "tkjhat/sdk.h"
 
@@ -65,25 +66,45 @@ static void imuTask(void *pvParameters) {
     }
 }
 
-static void buzzerbeater(const char *m) {
+
+//function to display text and play buzzer tones based on the input string
+static void outputTask(const char *m) {
+
+    uint8_t laskin = 0;
+    uint8_t laskin2 = 0;
+    char rivi[22];
+
+    for (int i = 0; m[i] != '\0'; i++) {
+        rivi[laskin] = m[i];
+        laskin++;
+
+        // If the line is full or it's the end of the message, print the line and reset the counter
+        if (laskin == 21 || m[i + 1] == '\0') {
+            rivi[laskin] = '\0';
+            write_text_xy(0, laskin2 * 8, rivi);
+            laskin2++;
+            laskin = 0;
+        }
+    }
+
     for (int i = 0; m[i] != '\0'; i++) {
                 
-                if (m[i] == ' ') {
-                    if (m[i + 1] == ' ') {
-                        sleep_ms(1400);
-                        i++;
-                    } else {
-                        sleep_ms(600);
-                    }
-                }
-                else if (m[i] == '.') {
-                    buzzer_play_tone(1000, 200);
-                    sleep_ms(200);
-                }
-                else if (m[i] == '-') {
-                    buzzer_play_tone(1000, 600);
-                }
+        if (m[i] == ' ') {
+            if (m[i + 1] == ' ') {
+                sleep_ms(1400);
+                i++;
+            } else {
+                sleep_ms(600);
             }
+        }
+        else if (m[i] == '.') {
+            buzzer_play_tone(1000, 200);
+            sleep_ms(200);
+        }
+        else if (m[i] == '-') {
+            buzzer_play_tone(1000, 600);
+        }
+    }
 }
 
 //task to read serial input and display it on the screen and play buzzer tones
@@ -106,12 +127,13 @@ static void serialTask(void *pvParameters) {
         }
 
         if (c == '\n') {
+
             message[index] = '\0';
 
             printf("%s  \n", message);
             clear_display();
-            write_text_xy(0, 0, message);
-            buzzerbeater(message);
+
+            outputTask(message);
 
             stdio_flush();
 
