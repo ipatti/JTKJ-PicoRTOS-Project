@@ -6,6 +6,7 @@
 #include <queue.h>
 #include <task.h>
 #include <inttypes.h>
+#include <inttypes.h>
 
 #include "tkjhat/sdk.h"
 
@@ -14,8 +15,10 @@
 #define SERIAL_TASK_STACK_SIZE 1024
 #define SERIAL_BUFFER_SIZE 256
 #define MORSE_TIME_UNIT_MS 200
+#define MESSAGE_QUEUE_LENGTH 5
 
 uint8_t button_pressed = 0;
+static QueueHandle_t msgQueue;
 
 //button interrupt handler
 static void btn_fxn(uint gpio, uint32_t eventMask) {
@@ -67,34 +70,62 @@ static void imuTask(void *pvParameters) {
     }
 }
 
-static void play_morse_message(const char *message) {
-    for (size_t i = 0; message[i] != '\0'; i++) {
-        if (message[i] == '.') {
-            buzzer_play_tone(1000, MORSE_TIME_UNIT_MS);
-        } else if (message[i] == '-') {
-            buzzer_play_tone(1000, 3 * MORSE_TIME_UNIT_MS);
-        } else if (message[i] == ' ') {
-            size_t space_count = 1;
 
-            while (message[i + space_count] == ' ') {
-                space_count++;
-            }
+//function to display text and play buzzer tones based on the input string
+static void outputTask(const char *m) {
 
-            if (space_count >= 2) {
-                sleep_ms(7 * MORSE_TIME_UNIT_MS);
-                i += space_count - 1;
+    uint8_t laskin = 0;
+    uint8_t laskin2 = 0;
+    char rivi[22];
+
+    for (int i = 0; m[i] != '\0'; i++) {
+        rivi[laskin] = m[i];
+        laskin++;
+
+        // If the line is full or it's the end of the message, print the line and reset the counter
+        if (laskin == 21 || m[i + 1] == '\0') {
+            rivi[laskin] = '\0';
+            write_text_xy(0, laskin2 * 8, rivi);
+            laskin2++;
+            laskin = 0;
+        }
+    }
+
+    for (int i = 0; m[i] != '\0'; i++) {
+                
+        if (m[i] == ' ') {
+            if (m[i + 1] == ' ') {
+                sleep_ms(1400);
+                i++;
             } else {
-                sleep_ms(3 * MORSE_TIME_UNIT_MS);
+                sleep_ms(600);
             }
         }
-
-        if ((message[i] == '.' || message[i] == '-') &&
-            (message[i + 1] == '.' || message[i + 1] == '-')) {
-            sleep_ms(MORSE_TIME_UNIT_MS);
+        else if (m[i] == '.') {
+            buzzer_play_tone(1000, 200);
+            sleep_ms(200);
+        }
+        else if (m[i] == '-') {
+            buzzer_play_tone(1000, 600);
         }
     }
 }
 
+
+//task to take messages from queue and output them
+static void queueTask(void *pvParameters) {
+    (void)pvParameters;
+    char m[SERIAL_BUFFER_SIZE];
+
+    while (1) {
+        xQueueReceive(msgQueue, m, portMAX_DELAY);
+
+        printf("%s  \n", m);
+        clear_display();
+        outputTask(m);
+        stdio_flush();
+    }
+}
 //task to read serial input and display it on the screen and play buzzer tones
 static void serialTask(void *pvParameters) {
     (void)pvParameters;
@@ -117,14 +148,17 @@ static void serialTask(void *pvParameters) {
         }
 
         if (c == '\n') {
+
             message[index] = '\0';
 
-            xQueueSend(q, &message);
+            if (xQueueSend(msgQueue, message, 0) != pdPASS) {
+                printf("Queue full, message dropped\n");
+            }
 
             printf("%s  \n", message);
             clear_display();
-            write_text_xy(0, 0, message);
-            play_morse_message(message);
+
+            outputTask(message);
 
             stdio_flush();
 
@@ -165,12 +199,14 @@ int main() {
     gpio_set_irq_enabled(SW2_PIN, GPIO_IRQ_EDGE_FALL, true);
 
     sleep_ms(50);
+
     // queue for "buffering" the messages send from serial client. Prevents the loss of messages before the device can output them
-    static QueueHandle_t q = xQueueCreate(5, SERIAL_BUFFER_SIZE);
+    msgQueue = xQueueCreate(MESSAGE_QUEUE_LENGTH, SERIAL_BUFFER_SIZE);
 
     xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
-    xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
+    xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 2, NULL);
     xTaskCreate(print_task, "Print Task", DEFAULT_STACK_SIZE, NULL, 1, NULL);
+    xTaskCreate(queueTask, "Queue Task", DEFAULT_STACK_SIZE, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
