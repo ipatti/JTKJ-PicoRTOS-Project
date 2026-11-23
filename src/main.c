@@ -16,20 +16,28 @@
 uint8_t button1_pressed = 0;
 uint8_t button2_pressed = 0;
 
+char msg[SERIAL_BUFFER_SIZE];
+size_t msg_index = 0;
+bool z_positive = true;
+
 //button interrupt handler
 static void btn_fxn(uint gpio, uint32_t eventMask) {
-    static uint32_t last_ms = 0;
+    static uint32_t last_ms1 = 0;
+    static uint32_t last_ms2 = 0;
 
     uint32_t now = to_ms_since_boot(get_absolute_time());
 
-    if (now - last_ms < 500) {
-        return;
-    }
-    last_ms = now;
-
     if (gpio == SW1_PIN) {
+        if (now - last_ms1 < 200) {
+            return; // debounce
+        }
+        last_ms1 = now;
         button1_pressed = 1;
     } else if (gpio == SW2_PIN) {
+        if (now - last_ms2 < 200) {
+            return; // debounce
+        }
+        last_ms2 = now;
         button2_pressed = 1;
     }
 }
@@ -45,27 +53,17 @@ static void imuTask(void *pvParameters) {
         ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t);
         stdio_flush();
         vTaskDelay(pdMS_TO_TICKS(500));
+        if (z_positive && az < 0.0) {
+            z_positive = false;
 
-
+        } else if (!z_positive && az > 0.5) {
+            z_positive = true;
+        }
         //printf(">ax:%.2f,ay:%.2f,az:%.2f\n", ax, ay, az);
-
-
-        if (az > 0.0 && button1_pressed) {
-            printf("__. Button 1 pressed and az > 0.0__\n");
-            buzzer_play_tone(1000, 200);
-            button1_pressed = 0;
-        }
-
-        if (az < 0.0 && button1_pressed) {
-            printf("__. Button 1 pressed and az < 0.0__\n");
-            buzzer_play_tone(1000, 200);
-            button1_pressed = 0;
-        }
 
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
-
 
 //function to display text and play buzzer tones based on the input string
 static void outputTask(const char *m) {
@@ -86,26 +84,78 @@ static void outputTask(const char *m) {
             laskin = 0;
         }
     }
-
-    for (int i = 0; m[i] != '\0'; i++) {
-                
-        if (m[i] == ' ') {
-            if (m[i + 1] == ' ') {
-                sleep_ms(1400);
-                i++;
-            } else {
-                sleep_ms(600);
+    if (msg_index == 0) {
+    
+        for (int i = 0; m[i] != '\0'; i++) {
+                    
+            if (m[i] == ' ') {
+                if (m[i + 1] == ' ') {
+                    sleep_ms(1400);
+                    i++;
+                } else {
+                    sleep_ms(600);
+                }
             }
-        }
-        else if (m[i] == '.') {
-            buzzer_play_tone(1000, 200);
-            sleep_ms(200);
-        }
-        else if (m[i] == '-') {
-            buzzer_play_tone(1000, 600);
+            else if (m[i] == '.') {
+                buzzer_play_tone(1000, 200);
+                sleep_ms(200);
+            }
+            else if (m[i] == '-') {
+                buzzer_play_tone(1000, 600);
+            }
+    
         }
     }
 }
+
+static void inputTask(void *pvParameters) {
+    (void)pvParameters;
+
+    while (1) {
+        if (button1_pressed || button2_pressed) {
+            vTaskDelay(pdMS_TO_TICKS(500)); // Wait for 500 ms to allow for both buttons to be pressed
+            if (button1_pressed && !button2_pressed) {
+
+                if (z_positive) {
+                    if (msg_index < SERIAL_BUFFER_SIZE - 1) {
+                        msg[msg_index++] = '-';
+                        msg[msg_index] = '\0'; // Null-terminate the string
+                        outputTask(msg);
+                    }
+                } else {
+                    if (msg_index < SERIAL_BUFFER_SIZE - 1) {
+                        msg[msg_index++] = '.';
+                        msg[msg_index] = '\0'; // Null-terminate the string
+                        outputTask(msg);
+                    }
+                }
+
+                button1_pressed = 0;
+
+            } else if (button2_pressed && !button1_pressed) {
+                if (msg_index < SERIAL_BUFFER_SIZE - 1) {
+                    msg[msg_index++] = ' ';
+                    msg[msg_index] = '\0'; // Null-terminate the string
+                }
+                button2_pressed = 0;
+            }
+            else if (button1_pressed && button2_pressed) {
+                
+                printf("%s\n", msg);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                outputTask(msg);
+                msg_index = 0; // Reset the message index after outputting the message
+                msg[0] = '\0'; // Clear the message buffer
+                button1_pressed = 0;
+                button2_pressed = 0;
+                
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
 
 //task to read serial input and display it on the screen and play buzzer tones
 static void serialTask(void *pvParameters) {
@@ -171,13 +221,14 @@ int main() {
     //init buzzer
     init_buzzer();
 
-    gpio_set_irq_enabled_with_callback(SW1_PIN, GPIO_IRQ_EDGE_FALL, true, btn_fxn);
-    gpio_set_irq_enabled(SW2_PIN, GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled_with_callback(SW1_PIN, GPIO_IRQ_EDGE_RISE, true, btn_fxn);
+    gpio_set_irq_enabled(SW2_PIN, GPIO_IRQ_EDGE_RISE, true);
 
     sleep_ms(50);
 
     xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
+    xTaskCreate(inputTask, "Input Task", DEFAULT_STACK_SIZE, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
