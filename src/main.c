@@ -7,12 +7,14 @@
 #include <task.h>
 #include <inttypes.h>
 #include "tkjhat/sdk.h"
+#include <semphr.h>
 
 #define IMU_TASK_STACK_SIZE 1024
 #define DEFAULT_STACK_SIZE 2048
 #define SERIAL_TASK_STACK_SIZE 1024
 #define SERIAL_BUFFER_SIZE 256
 
+static SemaphoreHandle_t i2cMutex; 
 uint8_t button1_pressed = 0;
 uint8_t button2_pressed = 0;
 
@@ -50,7 +52,9 @@ static void imuTask(void *pvParameters) {
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     while (1) {
+        xSemaphoreTake(i2cMutex, portMAX_DELAY);
         ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t);
+        xSemaphoreGive(i2cMutex);
         stdio_flush();
         vTaskDelay(pdMS_TO_TICKS(500));
         if (z_positive && az < 0.0) {
@@ -72,6 +76,11 @@ static void outputTask(const char *m) {
     uint8_t laskin2 = 0;
     char rivi[22];
 
+    xSemaphoreTake(i2cMutex, portMAX_DELAY);
+
+    clear_display();
+
+
     for (int i = 0; m[i] != '\0'; i++) {
         rivi[laskin] = m[i];
         laskin++;
@@ -79,11 +88,14 @@ static void outputTask(const char *m) {
         // If the line is full or it's the end of the message, print the line and reset the counter
         if (laskin == 21 || m[i + 1] == '\0') {
             rivi[laskin] = '\0';
+            
             write_text_xy(0, laskin2 * 8, rivi);
             laskin2++;
             laskin = 0;
         }
     }
+    xSemaphoreGive(i2cMutex);
+
     if (msg_index == 0) {
     
         for (int i = 0; m[i] != '\0'; i++) {
@@ -141,7 +153,10 @@ static void inputTask(void *pvParameters) {
             }
             else if (button1_pressed && button2_pressed) {
                 
-                printf("%s\n", msg);
+                if (msg_index > 0) {               // don't send an empty message
+                    printf("%s  \n", msg);
+                    stdio_flush();
+                    }
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 outputTask(msg);
                 msg_index = 0; // Reset the message index after outputting the message
@@ -181,7 +196,6 @@ static void serialTask(void *pvParameters) {
             message[index] = '\0';
 
             printf("%s  \n", message);
-            clear_display();
 
             outputTask(message);
 
@@ -223,6 +237,8 @@ int main() {
 
     gpio_set_irq_enabled_with_callback(SW1_PIN, GPIO_IRQ_EDGE_RISE, true, btn_fxn);
     gpio_set_irq_enabled(SW2_PIN, GPIO_IRQ_EDGE_RISE, true);
+
+    i2cMutex = xSemaphoreCreateMutex();
 
     sleep_ms(50);
 
