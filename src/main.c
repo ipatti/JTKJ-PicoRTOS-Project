@@ -13,8 +13,14 @@
 #define DEFAULT_STACK_SIZE 2048
 #define SERIAL_TASK_STACK_SIZE 1024
 #define SERIAL_BUFFER_SIZE 256
+#define MORSE_TIME_UNIT_MS 200
+#define IMU_READ_PERIOD_MS 100
 
-static SemaphoreHandle_t i2cMutex; 
+// display and IMU share the same I2C bus -> only one task may use it at a time
+static SemaphoreHandle_t i2cMutex;
+// buzzer is shared too: received messages and typed symbols must not play at the same time
+static SemaphoreHandle_t buzzerMutex;
+
 uint8_t button1_pressed = 0;
 uint8_t button2_pressed = 0;
 
@@ -47,76 +53,101 @@ static void btn_fxn(uint gpio, uint32_t eventMask) {
 //task to read IMU data and print it to the console
 static void imuTask(void *pvParameters) {
     (void)pvParameters;
-    float gx, gy, gz, ay, ax, az, t;
+    float gx = 0, gy = 0, gz = 0, ay = 0, ax = 0, az = 0, t = 0;
 
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     while (1) {
+        vTaskDelay(pdMS_TO_TICKS(IMU_READ_PERIOD_MS));
+
+        // read first, then use the value right away (it's fresh, not 500 ms old)
         xSemaphoreTake(i2cMutex, portMAX_DELAY);
-        ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t);
+        int rc = ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t);
         xSemaphoreGive(i2cMutex);
-        stdio_flush();
-        vTaskDelay(pdMS_TO_TICKS(500));
+
+        if (rc != 0) {
+            continue;   // failed read: keep the previous z_positive
+        }
+
+        // hysteresis: flip only clearly past the thresholds, so it doesn't flicker near flat
         if (z_positive && az < 0.0) {
             z_positive = false;
-
         } else if (!z_positive && az > 0.5) {
             z_positive = true;
         }
         //printf(">ax:%.2f,ay:%.2f,az:%.2f\n", ax, ay, az);
-
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
-//function to display text and play buzzer tones based on the input string
-static void outputTask(const char *m) {
+//plays one Morse symbol ('.' or '-') on the buzzer, followed by the 1-unit gap between symbols
+static void playSymbol(char c) {
+    if (c == '.') {
+        buzzer_play_tone(1000, MORSE_TIME_UNIT_MS);
+        vTaskDelay(pdMS_TO_TICKS(MORSE_TIME_UNIT_MS));
+    } else if (c == '-') {
+        buzzer_play_tone(1000, 3 * MORSE_TIME_UNIT_MS);
+        vTaskDelay(pdMS_TO_TICKS(MORSE_TIME_UNIT_MS));
+    }
+}
+
+//function to display text and (if play_sound) play the whole message on the buzzer
+static void outputTask(const char *m, bool play_sound) {
 
     uint8_t laskin = 0;
     uint8_t laskin2 = 0;
     char rivi[22];
 
+    // Display and IMU share the I2C bus -> lock it while drawing.
+    // Note: the SDK's write_text_xy() sleeps 800 ms per call, so the lock is held ~0.8 s per row.
     xSemaphoreTake(i2cMutex, portMAX_DELAY);
 
     clear_display();
 
-
-    for (int i = 0; m[i] != '\0'; i++) {
+    for (int i = 0; m[i] != '\0' && laskin2 < 8; i++) {   // display has 8 rows
         rivi[laskin] = m[i];
         laskin++;
 
         // If the line is full or it's the end of the message, print the line and reset the counter
         if (laskin == 21 || m[i + 1] == '\0') {
             rivi[laskin] = '\0';
-            
+
             write_text_xy(0, laskin2 * 8, rivi);
             laskin2++;
             laskin = 0;
         }
     }
+
     xSemaphoreGive(i2cMutex);
 
-    if (msg_index == 0) {
-    
+    // Buzzer playback: no I2C, so outside the I2C lock. vTaskDelay lets other tasks run during the gaps.
+    // buzzerMutex: only one task may drive the buzzer at a time (tasks run on two cores).
+    if (play_sound) {
+        xSemaphoreTake(buzzerMutex, portMAX_DELAY);
+
         for (int i = 0; m[i] != '\0'; i++) {
-                    
+
             if (m[i] == ' ') {
                 if (m[i + 1] == ' ') {
-                    sleep_ms(1400);
+                    vTaskDelay(pdMS_TO_TICKS(6 * MORSE_TIME_UNIT_MS));   // word gap (7 units incl. symbol gap)
                     i++;
                 } else {
-                    sleep_ms(600);
+                    vTaskDelay(pdMS_TO_TICKS(2 * MORSE_TIME_UNIT_MS));   // letter gap (3 units incl. symbol gap)
                 }
+            } else {
+                playSymbol(m[i]);
             }
-            else if (m[i] == '.') {
-                buzzer_play_tone(1000, 200);
-                sleep_ms(200);
-            }
-            else if (m[i] == '-') {
-                buzzer_play_tone(1000, 600);
-            }
-    
         }
+
+        xSemaphoreGive(buzzerMutex);
+    }
+}
+
+//feedback beep for a symbol the user just typed. If the buzzer is busy playing a message
+//from the PC, skip the beep instead of waiting (typing must not freeze for seconds).
+static void beepTypedSymbol(char c) {
+    if (xSemaphoreTake(buzzerMutex, 0) == pdTRUE) {
+        playSymbol(c);
+        xSemaphoreGive(buzzerMutex);
     }
 }
 
@@ -132,13 +163,15 @@ static void inputTask(void *pvParameters) {
                     if (msg_index < SERIAL_BUFFER_SIZE - 1) {
                         msg[msg_index++] = '-';
                         msg[msg_index] = '\0'; // Null-terminate the string
-                        outputTask(msg);
+                        outputTask(msg, false);  // show it, don't replay the whole message
+                        beepTypedSymbol('-');
                     }
                 } else {
                     if (msg_index < SERIAL_BUFFER_SIZE - 1) {
                         msg[msg_index++] = '.';
                         msg[msg_index] = '\0'; // Null-terminate the string
-                        outputTask(msg);
+                        outputTask(msg, false);  // show it, don't replay the whole message
+                        beepTypedSymbol('.');
                     }
                 }
 
@@ -154,10 +187,9 @@ static void inputTask(void *pvParameters) {
             else if (button1_pressed && button2_pressed) {
                 
                 if (msg_index > 0) {               // don't send an empty message
-                    printf("%s  \n", msg);   // no stdio_flush() here: suspected cause of the USB freeze
+                    printf("%s  \n", msg);
                 }
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                outputTask(msg);
+                outputTask(msg, false);
                 msg_index = 0; // Reset the message index after outputting the message
                 msg[0] = '\0'; // Clear the message buffer
                 button1_pressed = 0;
@@ -196,7 +228,7 @@ static void serialTask(void *pvParameters) {
 
             printf("%s  \n", message);
 
-            outputTask(message);
+            outputTask(message, true);   // messages from the PC are always played
 
             stdio_flush();
 
@@ -237,9 +269,13 @@ int main() {
     gpio_set_irq_enabled_with_callback(SW1_PIN, GPIO_IRQ_EDGE_RISE, true, btn_fxn);
     gpio_set_irq_enabled(SW2_PIN, GPIO_IRQ_EDGE_RISE, true);
 
-    i2cMutex = xSemaphoreCreateMutex();
 
     sleep_ms(50);
+
+    i2cMutex = xSemaphoreCreateMutex();
+    buzzerMutex = xSemaphoreCreateMutex();
+
+   
 
     xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
