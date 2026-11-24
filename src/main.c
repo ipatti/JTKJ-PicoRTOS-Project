@@ -16,17 +16,27 @@
 #define MORSE_TIME_UNIT_MS 200
 #define IMU_READ_PERIOD_MS 100
 
+
+typedef enum {
+    STATE_WAITING = 1,
+    STATE_INPUT,
+    STATE_SENDING,
+    STATE_PLAYING
+} state_t;
+
+volatile state_t programState = STATE_WAITING;
+
 // display and IMU share the same I2C bus -> only one task may use it at a time
 static SemaphoreHandle_t i2cMutex;
 // buzzer is shared too: received messages and typed symbols must not play at the same time
 static SemaphoreHandle_t buzzerMutex;
 
-uint8_t button1_pressed = 0;
-uint8_t button2_pressed = 0;
+volatile uint8_t button1_pressed = 0;
+volatile uint8_t button2_pressed = 0;
 
 char msg[SERIAL_BUFFER_SIZE];
 size_t msg_index = 0;
-bool z_positive = true;
+volatile bool z_positive = true;
 
 //button interrupt handler
 static void btn_fxn(uint gpio, uint32_t eventMask) {
@@ -59,6 +69,10 @@ static void imuTask(void *pvParameters) {
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(IMU_READ_PERIOD_MS));
+
+        if (programState != STATE_WAITING) {
+            continue;
+        }
 
         // read first, then use the value right away (it's fresh, not 500 ms old)
         xSemaphoreTake(i2cMutex, portMAX_DELAY);
@@ -151,12 +165,68 @@ static void beepTypedSymbol(char c) {
     }
 }
 
+// How fast the two chord notes alternate (ms per note). Smaller = smoother, more "chord"-like;
+// larger = audible bouncing/trill. Useful range ~8-40 ms.
+#define BUZZ_ARP_MS 15
+
+// two notes "at once" on a one-tone buzzer: switch between them every BUZZ_ARP_MS (fast arpeggio),
+// then a 15 ms gap so repeated notes stay separate
+static void buzzChord(uint16_t lo, uint16_t hi, uint16_t ms) {
+    uint16_t play = ms - 15;
+    for (uint16_t t = 0; t < play; t += BUZZ_ARP_MS) {
+        uint16_t d = (play - t < BUZZ_ARP_MS) ? (play - t) : BUZZ_ARP_MS;
+        buzzer_play_tone(((t / BUZZ_ARP_MS) & 1) ? hi : lo, d);
+    }
+    vTaskDelay(pdMS_TO_TICKS(15));
+}
+
+// single note + 15 ms gap
+static void buzzNote(uint16_t f, uint16_t ms) {
+    buzzer_play_tone(f, ms - 15);
+    vTaskDelay(pdMS_TO_TICKS(15));
+}
+
+// Plays the "Tyhmä" 3xOSC snippet (2 bars, ~102 BPM, ~4.4 s), one octave above the piano roll.
+// E = 1/8 note (two piano-roll steps), S = 1/32 note (the short F notes).
+static void playTyhmaSnippet(void) {
+    const uint16_t E = 294;   // 1/8 note at 102 BPM
+    const uint16_t S = 73;    // 1/32 note
+
+    // Hz:  F5 698, F#5 740, G#5 831, A#5 932, C6 1047, C#6 1109, D#6 1245, F6 1397
+    xSemaphoreTake(buzzerMutex, portMAX_DELAY);   // nothing else may beep meanwhile
+
+    // ---- bar 1 ----
+    buzzChord(932, 1245, E);              // A#5 + D#6
+    buzzNote(698, S);  vTaskDelay(pdMS_TO_TICKS(S));   // F5 short
+    buzzNote(698, S);  vTaskDelay(pdMS_TO_TICKS(S));   // F5 short
+    buzzChord(698, 1109, E);              // F5 + C#6
+    vTaskDelay(pdMS_TO_TICKS(E));         // rest
+    buzzChord(698, 1397, E);              // F5 + F6
+    buzzChord(740, 1245, E);              // F#5 + D#6
+    buzzChord(698, 1109, E);              // F5 + C#6
+    vTaskDelay(pdMS_TO_TICKS(E));         // rest
+
+    // ---- bar 2 ----
+    buzzChord(698, 1109, E);              // F5 + C#6
+    buzzNote(698, S);  vTaskDelay(pdMS_TO_TICKS(S));   // F5 short
+    buzzNote(698, S);  vTaskDelay(pdMS_TO_TICKS(S));   // F5 short
+    buzzChord(698, 1047, E);              // F5 + C6
+    vTaskDelay(pdMS_TO_TICKS(E));         // rest
+    buzzChord(831, 1109, E);              // G#5 + C#6
+    buzzChord(932, 1245, E);              // A#5 + D#6
+    buzzChord(698, 1109, E);              // F5 + C#6
+
+    xSemaphoreGive(buzzerMutex);
+}
+
 static void inputTask(void *pvParameters) {
     (void)pvParameters;
 
     while (1) {
-        if (button1_pressed || button2_pressed) {
+        if (programState == STATE_WAITING && (button1_pressed || button2_pressed)) {
+            programState = STATE_INPUT;
             vTaskDelay(pdMS_TO_TICKS(500)); // Wait for 500 ms to allow for both buttons to be pressed
+
             if (button1_pressed && !button2_pressed) {
 
                 if (z_positive) {
@@ -185,17 +255,24 @@ static void inputTask(void *pvParameters) {
                 button2_pressed = 0;
             }
             else if (button1_pressed && button2_pressed) {
-                
+                programState = STATE_SENDING;
+
+                bool sent = false;
                 if (msg_index > 0) {               // don't send an empty message
                     printf("%s  \n", msg);
+                    sent = true;
                 }
                 outputTask(msg, false);
+                if (sent) {
+                    playTyhmaSnippet();            // "message sent" feedback (~4.4 s), still in STATE_SENDING
+                }
                 msg_index = 0; // Reset the message index after outputting the message
                 msg[0] = '\0'; // Clear the message buffer
                 button1_pressed = 0;
                 button2_pressed = 0;
-                
             }
+
+            programState = STATE_WAITING;
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -223,6 +300,10 @@ static void serialTask(void *pvParameters) {
         }
 
         if (c == '\n') {
+            while (programState != STATE_WAITING) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+            programState = STATE_PLAYING;
 
             message[index] = '\0';
 
@@ -233,6 +314,7 @@ static void serialTask(void *pvParameters) {
             stdio_flush();
 
             index = 0;
+            programState = STATE_WAITING;
         } else if (index < SERIAL_BUFFER_SIZE - 1) {
             message[index++] = (char)c;
         } else {
@@ -275,7 +357,6 @@ int main() {
     i2cMutex = xSemaphoreCreateMutex();
     buzzerMutex = xSemaphoreCreateMutex();
 
-   
 
     xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
