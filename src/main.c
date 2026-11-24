@@ -16,17 +16,26 @@
 #define MORSE_TIME_UNIT_MS 200
 #define IMU_READ_PERIOD_MS 100
 
+typedef enum {
+    STATE_WAITING = 1,
+    STATE_INPUT,
+    STATE_SENDING,
+    STATE_PLAYING
+} state_t;
+
+volatile state_t programState = STATE_WAITING;
+
 // display and IMU share the same I2C bus -> only one task may use it at a time
 static SemaphoreHandle_t i2cMutex;
 // buzzer is shared too: received messages and typed symbols must not play at the same time
 static SemaphoreHandle_t buzzerMutex;
 
-uint8_t button1_pressed = 0;
-uint8_t button2_pressed = 0;
+volatile uint8_t button1_pressed = 0;
+volatile uint8_t button2_pressed = 0;
 
 char msg[SERIAL_BUFFER_SIZE];
 size_t msg_index = 0;
-bool z_positive = true;
+volatile bool z_positive = true;
 
 //button interrupt handler
 static void btn_fxn(uint gpio, uint32_t eventMask) {
@@ -59,6 +68,10 @@ static void imuTask(void *pvParameters) {
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(IMU_READ_PERIOD_MS));
+
+        if (programState != STATE_WAITING) {
+            continue;
+        }
 
         // read first, then use the value right away (it's fresh, not 500 ms old)
         xSemaphoreTake(i2cMutex, portMAX_DELAY);
@@ -155,8 +168,10 @@ static void inputTask(void *pvParameters) {
     (void)pvParameters;
 
     while (1) {
-        if (button1_pressed || button2_pressed) {
+        if (programState == STATE_WAITING && (button1_pressed || button2_pressed)) {
+            programState = STATE_INPUT;
             vTaskDelay(pdMS_TO_TICKS(500)); // Wait for 500 ms to allow for both buttons to be pressed
+
             if (button1_pressed && !button2_pressed) {
 
                 if (z_positive) {
@@ -185,7 +200,8 @@ static void inputTask(void *pvParameters) {
                 button2_pressed = 0;
             }
             else if (button1_pressed && button2_pressed) {
-                
+                programState = STATE_SENDING;
+
                 if (msg_index > 0) {               // don't send an empty message
                     printf("%s  \n", msg);
                 }
@@ -194,8 +210,9 @@ static void inputTask(void *pvParameters) {
                 msg[0] = '\0'; // Clear the message buffer
                 button1_pressed = 0;
                 button2_pressed = 0;
-                
             }
+
+            programState = STATE_WAITING;
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -223,6 +240,10 @@ static void serialTask(void *pvParameters) {
         }
 
         if (c == '\n') {
+            while (programState != STATE_WAITING) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+            programState = STATE_PLAYING;
 
             message[index] = '\0';
 
@@ -233,6 +254,7 @@ static void serialTask(void *pvParameters) {
             stdio_flush();
 
             index = 0;
+            programState = STATE_WAITING;
         } else if (index < SERIAL_BUFFER_SIZE - 1) {
             message[index++] = (char)c;
         } else {
@@ -275,7 +297,6 @@ int main() {
     i2cMutex = xSemaphoreCreateMutex();
     buzzerMutex = xSemaphoreCreateMutex();
 
-   
 
     xTaskCreate(imuTask, "IMU Task", IMU_TASK_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(serialTask, "Serial Task", SERIAL_TASK_STACK_SIZE, NULL, 1, NULL);
