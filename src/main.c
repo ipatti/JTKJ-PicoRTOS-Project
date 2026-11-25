@@ -186,6 +186,31 @@ static void buzzNote(uint16_t f, uint16_t ms) {
     vTaskDelay(pdMS_TO_TICKS(15));
 }
 
+static void drawSmiley(void) {
+
+    xSemaphoreTake(i2cMutex, portMAX_DELAY);
+
+    clear_display();
+
+    // Kasvot
+    draw_circle(64, 32, 25, false);
+
+    // Silmät
+    draw_circle(55, 25, 3, true);
+    draw_circle(73, 25, 3, true);
+
+    // Hymy
+    draw_line(48, 38, 52, 44);
+    draw_line(52, 44, 58, 48);
+    draw_line(58, 48, 64, 50);
+    draw_line(64, 50, 70, 48);
+    draw_line(70, 48, 76, 44);
+    draw_line(76, 44, 80, 38);
+
+    xSemaphoreGive(i2cMutex);
+}
+
+
 // Plays the "Tyhmä" 3xOSC snippet (2 bars, ~102 BPM, ~4.4 s), one octave above the piano roll.
 // E = 1/8 note (two piano-roll steps), S = 1/32 note (the short F notes).
 static void playTyhmaSnippet(void) {
@@ -262,8 +287,13 @@ static void inputTask(void *pvParameters) {
                 }
                 outputTask(msg, false);
                 if (sent) {
-                    playTyhmaSnippet();            // "message sent" feedback (~4.4 s), still in STATE_SENDING
+                    clear_display();
+                    drawSmiley();
+                    playTyhmaSnippet();
+                    clear_display();
+                                // "message sent" feedback (~4.4 s), still in STATE_SENDING
                 }
+                
                 msg_index = 0; // Reset the message index after outputting the message
                 msg[0] = '\0'; // Clear the message buffer
                 button1_pressed = 0;
