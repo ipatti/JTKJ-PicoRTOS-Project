@@ -146,7 +146,7 @@ static void outputTask(const char *m, bool play_sound) {
     xSemaphoreGive(i2cMutex);
 
     // Buzzer playback: no I2C, so outside the I2C lock. vTaskDelay lets other tasks run during the gaps.
-    // buzzerMutex: only one task may drive the buzzer at a time (tasks run on two cores).
+    // buzzerMutex: only one task may drive the buzzer at a time.
     if (play_sound) {
         xSemaphoreTake(buzzerMutex, portMAX_DELAY);
 
@@ -168,7 +168,7 @@ static void outputTask(const char *m, bool play_sound) {
 }
 
 // Feedback beep for a symbol the user just typed. If the buzzer is busy playing a message
-// from the PC, skip the beep instead of waiting (typing must not freeze for seconds).
+// from the PC, skip the beep instead of waiting.
 static void beepTypedSymbol(char c) {
     if (xSemaphoreTake(buzzerMutex, 0) == pdTRUE) {
         playSymbol(c);
@@ -176,12 +176,11 @@ static void beepTypedSymbol(char c) {
     }
 }
 
-/* =========================================================================
- *  Buzzer music
- * ========================================================================= */
 
+// Buzzer music
 // Two notes "at once" on a one-tone buzzer: switch between them every BUZZ_ARP_MS (fast arpeggio),
 // then a 15 ms gap so repeated notes stay separate
+// Note: helper function created by Claude Opus 5.5
 static void buzzChord(uint16_t lo, uint16_t hi, uint16_t ms) {
     uint16_t play = ms - 15;
 
@@ -194,6 +193,7 @@ static void buzzChord(uint16_t lo, uint16_t hi, uint16_t ms) {
 }
 
 // Single note + 15 ms gap
+// Note: helper function created by Claude Opus 5.5
 static void buzzNote(uint16_t f, uint16_t ms) {
     buzzer_play_tone(f, ms - 15);
     vTaskDelay(pdMS_TO_TICKS(15));
@@ -226,6 +226,8 @@ static void drawSmiley(void) {
 // Plays the "Tyhmä" 3xOSC snippet (2 bars, ~102 BPM, ~4.4 s), one octave above the piano roll.
 // E = 1/8 note (two piano-roll steps), S = 1/32 note (the short F notes).
 // Hz: F5 698, F#5 740, G#5 831, A#5 932, C6 1047, C#6 1109, D#6 1245, F6 1397
+// Note: function created by Claude Opus 5.5
+// I used a screenshot of a piano roll sketch I made, and prompted it to create a function that plays that specific melody via buzzer. Opus 5.5 created this function, buzzChord() and buzzNote()
 static void playTyhmaSnippet(void) {
     const uint16_t E = 294;   // 1/8 note at 102 BPM
     const uint16_t S = 73;    // 1/32 note
@@ -254,11 +256,9 @@ static void playTyhmaSnippet(void) {
     xSemaphoreGive(buzzerMutex);
 }
 
-/* =========================================================================
- *  Input task (buttons -> Morse message)
- * ========================================================================= */
 
-// Button 1 adds '.' or '-' (by tilt), button 2 adds a space, both buttons send the message
+
+// Button 1 adds '.' or '-', button 2 adds a space, both buttons pressed at same time sends the message
 static void inputTask(void *pvParameters) {
     (void)pvParameters;
 
@@ -268,19 +268,19 @@ static void inputTask(void *pvParameters) {
             vTaskDelay(pdMS_TO_TICKS(500));   // Wait 500 ms to allow for both buttons to be pressed
 
             if (button1_pressed && !button2_pressed) {
-                // Button 1: add '-' or '.' depending on tilt
+                // Button 1: add '-' or '.'
                 if (z_positive) {
                     if (msg_index < SERIAL_BUFFER_SIZE - 1) {
                         msg[msg_index++] = '-';
                         msg[msg_index] = '\0';
-                        outputTask(msg, false);   // Show it, don't replay the whole message
+                        outputTask(msg, false);
                         beepTypedSymbol('-');
                     }
                 } else {
                     if (msg_index < SERIAL_BUFFER_SIZE - 1) {
                         msg[msg_index++] = '.';
                         msg[msg_index] = '\0';
-                        outputTask(msg, false);   // Show it, don't replay the whole message
+                        outputTask(msg, false);
                         beepTypedSymbol('.');
                     }
                 }
@@ -328,9 +328,6 @@ static void inputTask(void *pvParameters) {
     }
 }
 
-/* =========================================================================
- *  Serial task (PC -> Pico)
- * ========================================================================= */
 
 // Reads lines from the PC, then shows and plays them
 static void serialTask(void *pvParameters) {
@@ -373,9 +370,6 @@ static void serialTask(void *pvParameters) {
     }
 }
 
-/* =========================================================================
- *  Main
- * ========================================================================= */
 
 int main() {
     stdio_init_all();
@@ -402,8 +396,6 @@ int main() {
 
     sleep_ms(50);
 
-    // FreeRTOS objects: create AFTER the last sleep_ms(). Creating them before the
-    // scheduler starts disables interrupts until vTaskStartScheduler().
     i2cMutex = xSemaphoreCreateMutex();
     buzzerMutex = xSemaphoreCreateMutex();
 
