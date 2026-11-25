@@ -55,6 +55,7 @@ static void btn_fxn(uint gpio, uint32_t eventMask) {
     static uint32_t last_ms1 = 0;
     static uint32_t last_ms2 = 0;
 
+    //button debounce: ignore presses that are too close together
     uint32_t now = to_ms_since_boot(get_absolute_time());
 
     if (gpio == SW1_PIN) {
@@ -63,6 +64,7 @@ static void btn_fxn(uint gpio, uint32_t eventMask) {
         }
         last_ms1 = now;
         button1_pressed = 1;
+
     } else if (gpio == SW2_PIN) {
         if (now - last_ms2 < 200) {
             return;
@@ -84,6 +86,7 @@ static void imuTask(void *pvParameters) {
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(IMU_READ_PERIOD_MS));
 
+        // If we're not in the waiting state, don't read the IMU
         if (programState != STATE_WAITING) {
             continue;
         }
@@ -129,6 +132,7 @@ static void outputTask(const char *m, bool play_sound) {
 
     clear_display();
 
+    // Display the message, 21 characters per line, 8 lines max
     for (int i = 0; m[i] != '\0' && row < 8; i++) {   // Display has 8 rows
         rivi[col] = m[i];
         col++;
@@ -175,7 +179,6 @@ static void beepTypedSymbol(char c) {
     }
 }
 
-
 // Buzzer music
 // Two notes "at once" on a one-tone buzzer: switch between them every BUZZ_ARP_MS (fast arpeggio),
 // then a 15 ms gap so repeated notes stay separate
@@ -199,6 +202,9 @@ static void buzzNote(uint16_t f, uint16_t ms) {
 }
 
 // Draws a smiley on the display ("message sent" picture)
+//NOTE: This function was created by gemini hydrogen
+//Prompt: "Draw a smiley face on the display using the draw_circle and draw_line functions.
+//The smiley should have a circular face, two eyes, and a smiling mouth.
 static void drawSmiley(void) {
     xSemaphoreTake(i2cMutex, portMAX_DELAY);
 
@@ -230,7 +236,6 @@ static void drawSmiley(void) {
 static void playTyhmaSnippet(void) {
     const uint16_t E = 294;   // 1/8 note at 102 BPM
     const uint16_t S = 73;    // 1/32 note
-
     xSemaphoreTake(buzzerMutex, portMAX_DELAY);   // Nothing else may beep meanwhile
 
     // ---- Bar 1 ----
@@ -262,7 +267,10 @@ static void inputTask(void *pvParameters) {
     (void)pvParameters;
 
     while (1) {
+        // If we're not in the waiting state, don't process input
         if (programState == STATE_WAITING && (button1_pressed || button2_pressed)) {
+
+            //Go to input state, wait
             programState = STATE_INPUT;
             vTaskDelay(pdMS_TO_TICKS(500));   // Wait 500 ms to allow for both buttons to be pressed
 
@@ -294,7 +302,7 @@ static void inputTask(void *pvParameters) {
 
                 button2_pressed = 0;
             } else if (button1_pressed && button2_pressed) {
-                // Both buttons: send the message to the PC
+                // Both buttons: send the message to the PC and change state to STATE_SENDING. If the message is empty, don't send it.
                 programState = STATE_SENDING;
 
                 bool sent = false;
@@ -319,7 +327,7 @@ static void inputTask(void *pvParameters) {
                 button1_pressed = 0;
                 button2_pressed = 0;
             }
-
+            //switch back to waiting state
             programState = STATE_WAITING;
         }
 
