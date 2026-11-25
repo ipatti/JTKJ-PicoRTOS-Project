@@ -167,7 +167,7 @@ static void beepTypedSymbol(char c) {
 
 // How fast the two chord notes alternate (ms per note). Smaller = smoother, more "chord"-like;
 // larger = audible bouncing/trill. Useful range ~8-40 ms.
-#define BUZZ_ARP_MS 15
+#define BUZZ_ARP_MS 20
 
 // two notes "at once" on a one-tone buzzer: switch between them every BUZZ_ARP_MS (fast arpeggio),
 // then a 15 ms gap so repeated notes stay separate
@@ -196,9 +196,8 @@ static void playTyhmaSnippet(void) {
     xSemaphoreTake(buzzerMutex, portMAX_DELAY);   // nothing else may beep meanwhile
 
     // ---- bar 1 ----
-    buzzChord(932, 1245, E);              // A#5 + D#6
-    buzzNote(698, S);  vTaskDelay(pdMS_TO_TICKS(S));   // F5 short
-    buzzNote(698, S);  vTaskDelay(pdMS_TO_TICKS(S));   // F5 short
+    buzzChord(932, 1109, E);              // A#5 + C#6
+    buzzNote(698, S);  vTaskDelay(pdMS_TO_TICKS(3 * S));   // F5 short, then rest until step 4
     buzzChord(698, 1109, E);              // F5 + C#6
     vTaskDelay(pdMS_TO_TICKS(E));         // rest
     buzzChord(698, 1397, E);              // F5 + F6
@@ -208,8 +207,7 @@ static void playTyhmaSnippet(void) {
 
     // ---- bar 2 ----
     buzzChord(698, 1109, E);              // F5 + C#6
-    buzzNote(698, S);  vTaskDelay(pdMS_TO_TICKS(S));   // F5 short
-    buzzNote(698, S);  vTaskDelay(pdMS_TO_TICKS(S));   // F5 short
+    buzzNote(698, S);  vTaskDelay(pdMS_TO_TICKS(3 * S));   // F5 short, then rest until step 4
     buzzChord(698, 1047, E);              // F5 + C6
     vTaskDelay(pdMS_TO_TICKS(E));         // rest
     buzzChord(831, 1109, E);              // G#5 + C#6
