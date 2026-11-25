@@ -103,7 +103,6 @@ static void imuTask(void *pvParameters) {
         } else if (!z_positive && az > 0.0) {
             z_positive = true;
         }
-        //printf(">ax:%.2f,ay:%.2f,az:%.2f\n", ax, ay, az);
     }
 }
 
