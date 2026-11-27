@@ -4,7 +4,7 @@
 // -Mutex fix: We had a bug that caused a freeze on boot. After long debugging session, Opus 5.5 was able to find that creating mutexes on main() after sleep_ms(50) fixes the bug.
 // -Opus also created the buzzerMutex
 // -Functions Opus 5.5 created; beepTypedSymbol(), buzzChord(), buzzNote(), playTyhmaSnippet()
-// -Opus 5.5 was also used to find some small bugs/edgecases that might have caused problems ()
+// -Opus 5.5 was also used to find some small bugs/edgecases that might have caused problems
 
 
 #include <stdio.h>
@@ -16,7 +16,6 @@
 
 #include <FreeRTOS.h>
 #include <task.h>
-#include <queue.h>
 #include <semphr.h>
 
 #include "tkjhat/sdk.h"
@@ -167,8 +166,8 @@ static void outputTask(const char *m, bool play_sound) {
     xSemaphoreGive(i2cMutex);
 
 
-    // This part is created by opus5.5
-    // Buzzer playback: no I2C, so outside the I2C lock. vTaskDelay lets other tasks run during the gaps.
+    // Opus 5.5 suggested the play_sound boolean to the outputTask() function, so
+    //  that we can choose whether to play the sound or not
     // buzzerMutex: only one task may drive the buzzer at a time.
     if (play_sound) {
         xSemaphoreTake(buzzerMutex, portMAX_DELAY);
@@ -226,7 +225,7 @@ static void buzzNote(uint16_t f, uint16_t ms) {
 }
 
 // Draws a smiley on the display ("message sent" picture)
-//NOTE: This function was created by gemini hydrogen
+//NOTE: Gemini hydrogen helped with designing the smiley face.
 //Prompt: "Draw a smiley face on the display using the draw_circle and draw_line functions.
 //The smiley should have a circular face, two eyes, and a smiling mouth.
 //Joona
