@@ -51,6 +51,7 @@ volatile bool z_positive = true;
 
 
 // Button interrupt handler (200 ms debounce per button)
+//Joona
 static void btn_fxn(uint gpio, uint32_t eventMask) {
     static uint32_t last_ms1 = 0;
     static uint32_t last_ms2 = 0;
@@ -76,6 +77,7 @@ static void btn_fxn(uint gpio, uint32_t eventMask) {
 
 
 // Reads the IMU and keeps z_positive up to date (decides between '.' and '-')
+//Joona and Aleksi
 static void imuTask(void *pvParameters) {
     (void)pvParameters;
 
@@ -111,6 +113,7 @@ static void imuTask(void *pvParameters) {
 
 
 // Play either "." or "-" on buzzer
+//Aleksi
 static void playSymbol(char c) {
     if (c == '.') {
         buzzer_play_tone(1000, MORSE_TIME_UNIT_MS);
@@ -122,6 +125,7 @@ static void playSymbol(char c) {
 }
 
 // Shows the text on the display and (if play_sound) plays the whole message on the buzzer
+//Joona And Aleksi
 static void outputTask(const char *m, bool play_sound) {
     uint8_t col = 0;
     uint8_t row = 0;
@@ -172,6 +176,7 @@ static void outputTask(const char *m, bool play_sound) {
 
 // Feedback beep for a symbol the user just typed. If the buzzer is busy playing a message
 // from the PC, skip the beep instead of waiting.
+//Aleksi
 static void beepTypedSymbol(char c) {
     if (xSemaphoreTake(buzzerMutex, 0) == pdTRUE) {
         playSymbol(c);
@@ -183,6 +188,7 @@ static void beepTypedSymbol(char c) {
 // Two notes "at once" on a one-tone buzzer: switch between them every BUZZ_ARP_MS (fast arpeggio),
 // then a 15 ms gap so repeated notes stay separate
 // Note: helper function created by Claude Opus 5.5
+//Aleksi
 static void buzzChord(uint16_t lo, uint16_t hi, uint16_t ms) {
     uint16_t play = ms - 15;
 
@@ -196,6 +202,7 @@ static void buzzChord(uint16_t lo, uint16_t hi, uint16_t ms) {
 
 // Single note + 15 ms gap
 // Note: helper function created by Claude Opus 5.5
+//Aleksi
 static void buzzNote(uint16_t f, uint16_t ms) {
     buzzer_play_tone(f, ms - 15);
     vTaskDelay(pdMS_TO_TICKS(15));
@@ -205,6 +212,7 @@ static void buzzNote(uint16_t f, uint16_t ms) {
 //NOTE: This function was created by gemini hydrogen
 //Prompt: "Draw a smiley face on the display using the draw_circle and draw_line functions.
 //The smiley should have a circular face, two eyes, and a smiling mouth.
+//Joona
 static void drawSmiley(void) {
     xSemaphoreTake(i2cMutex, portMAX_DELAY);
 
@@ -233,6 +241,7 @@ static void drawSmiley(void) {
 // Hz: F5 698, F#5 740, G#5 831, A#5 932, C6 1047, C#6 1109, D#6 1245, F6 1397
 // Note: function created by Claude Opus 5.5
 // I used a screenshot of a piano roll sketch I made, and prompted it to create a function that plays that specific melody via buzzer. Opus 5.5 created this function, buzzChord() and buzzNote()
+//Aleksi
 static void playTyhmaSnippet(void) {
     const uint16_t E = 294;   // 1/8 note at 102 BPM
     const uint16_t S = 73;    // 1/32 note
@@ -263,6 +272,7 @@ static void playTyhmaSnippet(void) {
 
 
 // Button 1 adds '.' or '-', button 2 adds a space, both buttons pressed at same time sends the message
+//Joona
 static void inputTask(void *pvParameters) {
     (void)pvParameters;
 
@@ -337,6 +347,7 @@ static void inputTask(void *pvParameters) {
 
 
 // Reads lines from the PC, then shows and plays them
+//Aleksi
 static void serialTask(void *pvParameters) {
     (void)pvParameters;
 
