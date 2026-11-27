@@ -1,3 +1,12 @@
+// Joona Saarela & Aleksi Pyyny
+
+// AI use (Claude Opus 5.5):
+// -Mutex fix: We had a bug that caused a freeze on boot. After long debugging session, Opus 5.5 was able to find that creating mutexes on main() after sleep_ms(50) fixes the bug.
+// -Opus also created the buzzerMutex
+// -Functions Opus 5.5 created; beepTypedSymbol(), buzzChord(), buzzNote(), playTyhmaSnippet()
+// -Opus 5.5 was also used to find some small bugs/edgecases that might have caused problems ()
+
+
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
@@ -23,6 +32,7 @@
 
 // How fast the two chord notes alternate (ms per note). Smaller = smoother, more "chord"-like;
 // larger = audible bouncing/trill. Useful range ~8-40 ms.
+// Created by Opus when creating the buzzer music related functions
 #define BUZZ_ARP_MS 20
 
 
@@ -38,7 +48,9 @@ volatile state_t programState = STATE_WAITING;
 
 // Display and IMU share the same I2C bus -> only one task may use it at a time
 static SemaphoreHandle_t i2cMutex;
-// Buzzer is shared too: received messages and typed symbols must not play at the same time
+
+// Buzzer mutex to prevent received messages and typed symbols playing at the same time
+// Created by opus5.5
 static SemaphoreHandle_t buzzerMutex;
 
 volatile uint8_t button1_pressed = 0;
@@ -89,15 +101,17 @@ static void imuTask(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(IMU_READ_PERIOD_MS));
 
         // If we're not in the waiting state, don't read the IMU
+        // this check was added by opus5.5
         if (programState != STATE_WAITING) {
             continue;
         }
 
-        // Read first, then use the value right away (it's fresh, not 500 ms old)
+
         xSemaphoreTake(i2cMutex, portMAX_DELAY);
         int rc = ICM42670_read_sensor_data(&ax, &ay, &az, &gx, &gy, &gz, &t);
         xSemaphoreGive(i2cMutex);
 
+        // this check was also added by opus5.5 
         if (rc != 0) {
             continue;   // Failed read -> keep the previous z_positive
         }
@@ -152,6 +166,8 @@ static void outputTask(const char *m, bool play_sound) {
 
     xSemaphoreGive(i2cMutex);
 
+
+    // This part is created by opus5.5
     // Buzzer playback: no I2C, so outside the I2C lock. vTaskDelay lets other tasks run during the gaps.
     // buzzerMutex: only one task may drive the buzzer at a time.
     if (play_sound) {
@@ -176,7 +192,8 @@ static void outputTask(const char *m, bool play_sound) {
 
 // Feedback beep for a symbol the user just typed. If the buzzer is busy playing a message
 // from the PC, skip the beep instead of waiting.
-//Aleksi
+// Created by opus5.5
+
 static void beepTypedSymbol(char c) {
     if (xSemaphoreTake(buzzerMutex, 0) == pdTRUE) {
         playSymbol(c);
